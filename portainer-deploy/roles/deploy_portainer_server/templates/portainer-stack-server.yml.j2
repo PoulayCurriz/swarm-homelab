@@ -1,0 +1,76 @@
+---
+services:
+  portainer:
+    image: portainer/portainer-ce:{{ portainer_version }}
+    command: -H tcp://tasks.agent:9001 --tlsskipverify --log-level=DEBUG
+    volumes:
+      - portainer_data:/data
+{% if extra_certificates|default([]) %}
+    entrypoint: >
+      sh -c "apk add --no-cache ca-certificates &&
+      update-ca-certificates && exec /portainer"
+    secrets:
+{% for certificate in extra_certificates %}
+      - source: {{ certificate.name }}
+        target: /usr/local/share/ca-certificates/{{ certificate.name }}.crt
+{% endfor %}
+{% endif %}
+    networks:
+      - agent_network
+{% if extra_networks|default([]) %}
+{% for network in extra_networks %}
+      - {{ network.name }}
+{% endfor %}
+{% endif %}
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+    deploy:
+      mode: replicated
+      replicas: 1
+      resources:
+        reservations:
+          cpus: '0.10'
+          memory: 64M
+        limits:
+          cpus: '1'
+          memory: 96M
+      placement:
+        constraints:
+          - node.platform.os == linux
+          - node.role == manager
+{% if extra_constraints|default([]) %}
+{% for constraint in extra_constraints %}
+          - {{ constraint.rule }}
+{% endfor %}
+{% endif %}
+{% if docker_labels|default([]) %}
+      labels:
+{% for label in docker_labels %}
+        - {{ label.rule }}
+{% endfor %}
+{% endif %}
+
+{% if extra_certificates|default([]) %}
+secrets:
+{% for certificate in extra_certificates %}
+  {{ certificate.name }}:
+    external: true
+{% endfor %}
+{% endif %}
+
+networks:
+  agent_network:
+    driver: overlay
+    attachable: true
+    internal: false
+{% if extra_networks|default([]) %}
+{% for network in extra_networks %}
+  {{ network.name }}:
+    external: {{ network.external }}
+{% endfor %}
+{% endif %}
+
+volumes:
+  portainer_data:

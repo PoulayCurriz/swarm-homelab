@@ -1,0 +1,122 @@
+---
+services:
+
+  postgres:
+    image: postgres:17-alpine
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == worker.home.arpa
+          - node.labels.schedulable == true
+      resources:
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+        limits:
+          memory: 512M
+          cpus: '1'
+    healthcheck:
+      # yamllint disable rule:line-length
+      test: ["CMD-SHELL", "psql -U $$POSTGRES_USER -d $$POSTGRES_DB -c 'SELECT 1' >/dev/null"]
+      interval: 30s
+      retries: 5
+      timeout: 5s
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+        max-size: "200k"
+        max-file: "10"
+    networks:
+      - keycloak
+    secrets:
+      - keycloak_postgresql_password
+    environment:
+      POSTGRES_USER: keycloak
+      POSTGRES_DB: keycloak
+      POSTGRES_PASSWORD_FILE: /run/secrets/keycloak_postgresql_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.0
+    secrets:
+      - keycloak_postgresql_password
+      - keycloak_admin_password
+    entrypoint:
+      - /bin/bash
+      - -c
+      # yamllint disable rule:line-length
+      - |
+        export KC_DB_PASSWORD=$$(cat /run/secrets/keycloak_postgresql_password)
+        export KEYCLOAK_ADMIN_PASSWORD=$$(cat /run/secrets/keycloak_admin_password)
+        /opt/keycloak/bin/kc.sh start-dev
+# yamllint enable rule:line-length
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres/keycloak
+      KC_DB_USERNAME: keycloak
+      JAVA_OPTS_APPEND: -Djgroups.dns.query=keycloak
+      KC_CACHE: ispn
+      KC_CACHE_STACK: kubernetes
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "true"
+      PROXY_ADDRESS_FORWARDING: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KEYCLOAK_ADMIN: admin
+      KC_LOG_LEVEL: INFO
+      KC_HEALTH_ENABLED: "true"
+    healthcheck:
+      # yamllint disable rule:line-length
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000; echo -en 'HEAD /health/ready HTTP/1.0\r\nConnection: close\r\n\r\n' >&3; cat <&3 | grep -q '200 OK'"]
+      interval: 30s
+      retries: 5
+      timeout: 3s
+    networks:
+      - homelab
+      - keycloak
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+        max-size: "200k"
+        max-file: "10"
+    deploy:
+      placement:
+        constraints:
+          - node.role == worker
+          - node.labels.schedulable == true
+      labels:
+        - traefik.enable=true
+        - traefik.swarm.network=homelab
+        - traefik.http.routers.keycloak_quay-io-http.rule=Host(`keycloak.home.arpa`)
+        - traefik.http.routers.keycloak_quay-io-http.entrypoints=web
+        - traefik.http.middlewares.keycloak-https-redirect.redirectscheme.scheme=https
+        - traefik.http.routers.keycloak_quay-io-http.middlewares=keycloak-https-redirect
+        - traefik.http.routers.keycloak_quay-io-https.rule=Host(`keycloak.home.arpa`)
+        - traefik.http.routers.keycloak_quay-io-https.entrypoints=websecure
+        - traefik.http.routers.keycloak_quay-io-https.tls=true
+        - traefik.http.middlewares.hsts-headers.headers.stsSeconds=315360000
+        - traefik.http.middlewares.hsts-headers.headers.stsPreload=true
+        - traefik.http.middlewares.hsts-headers.headers.stsIncludeSubdomains=true
+        - traefik.http.middlewares.hsts-headers.headers.customFrameOptionsValue=SAMEORIGIN
+        - traefik.http.middlewares.hsts-headers.headers.sslRedirect=true
+        - traefik.http.middlewares.hsts-headers.headers.forceSTSHeader=true
+        - traefik.http.middlewares.hsts-headers.headers.referrerPolicy=same-origin
+        - traefik.http.routers.keycloak_quay-io-https.middlewares=hsts-headers
+        - traefik.http.services.keycloak_quay-io.loadbalancer.server.port=8080
+
+networks:
+  keycloak:
+  homelab:
+    external: true
+
+volumes:
+  postgres_data:
+
+secrets:
+  keycloak_postgresql_password:
+    external: true
+  keycloak_admin_password:
+    external: true

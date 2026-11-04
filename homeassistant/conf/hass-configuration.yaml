@@ -1,0 +1,48 @@
+---
+# Loads default set of integrations. Do not remove.
+default_config:
+
+# Load frontend themes from the themes folder
+frontend:
+  themes: !include_dir_merge_named themes
+
+# automation: !include automations.yaml
+# script: !include scripts.yaml
+# scene: !include scenes.yaml
+
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+
+homeassistant:
+  auth_providers:
+    # Ensure you have the homeassistant provider enabled if you want to
+    # continue using your existing accounts
+    - type: homeassistant
+    - type: command_line
+      command: /config/lldap-ha-auth.sh
+      # arguments: [<LDAP Host>, <regular group>, <admin group>, <local group>]
+      # <regular group>: Find users that has permission to access homeassistant
+      # anyone inside this group will have the default
+      # 'system-users' permission in hass.
+      #
+      # <admin group>: Allow users in the <regular group> to be assigned
+      # into 'system-admin' group. Anyone inside this group will not have
+      # the 'system-users' permission as only one permission group
+      # is allowed in homeassistant
+      #
+      # <local group>: Users in the <local group> (e.g., 'homeassistant_local')
+      # can only access homeassistant inside LAN network.
+      #
+      # Only the first argument is required. ["https://lldap.example.com"]
+      # allows all users to log in from anywhere and have 'system-users'
+      # permissions.
+      args: [
+        "https://lldap.home.arpa",
+        "hass_user", "hass_admin",
+        "hass_local"
+      ]
+      meta: true

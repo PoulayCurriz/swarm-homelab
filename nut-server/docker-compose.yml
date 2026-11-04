@@ -1,0 +1,28 @@
+networks:
+  homelab:
+    external: true
+  external:
+    driver: overlay
+    attachable: false
+
+services:
+  peanut:
+    image: brandawg93/peanut:latest
+    environment:
+      - WEB_PORT=8080
+    networks:
+      - homelab
+      - external
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=homelab"
+        - "traefik.http.routers.peanut-http.entrypoints=web"
+        - "traefik.http.routers.peanut-http.rule=Host(`peanut.home.arpa`)"
+        - "traefik.http.routers.peanut-http.middlewares=peanut-https"
+        - "traefik.http.middlewares.peanut-https.redirectscheme.scheme=https"
+        - "traefik.http.routers.peanut.rule=Host(`peanut.home.arpa`)"
+        - "traefik.http.routers.peanut.entrypoints=websecure"
+        - "traefik.http.services.peanut.loadbalancer.server.port=8080"
+        - "traefik.http.routers.peanut.service=peanut"
+        - "traefik.http.routers.peanut.tls=true"

@@ -1,0 +1,29 @@
+# OS and editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Secrets: these belong in `docker secret`, never in the repository
+.env
+.env.*
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+*.kdbx
+wg0.conf
+jellyfin/newt_config.json
+
+# Ansible
+.ansible/
+ansible.cfg
+*.retry
+
+# Rendered or runtime data
+pangolin/config/letsencrypt/
+pangolin/config/key
+pangolin/config/traefik/logs/
+pangolin/config/db/
+*.log

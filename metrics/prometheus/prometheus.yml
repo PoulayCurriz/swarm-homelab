@@ -1,0 +1,75 @@
+---
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'cadvisor'
+    scrape_interval: 5s
+    dns_sd_configs:
+      - names:
+          - 'tasks.cadvisor'
+        type: 'A'
+        port: 8080
+    dockerswarm_sd_configs:
+      - host: 'tcp://docker_daemon_proxy:2375'
+        role: 'tasks'
+    relabel_configs:
+      - source_labels: [__meta_dockerswarm_task_state]
+        regex: 'running'
+        action: keep
+      - source_labels: [__meta_dockerswarm_service_label_prometheus_job]
+        regex: 'cadvisor'
+        action: keep
+      - source_labels: [__meta_dockerswarm_node_hostname]
+        target_label: 'hostname'
+      - source_labels: [__address__]
+        regex: '(.+):\d+'
+        replacement: '${1}:8080'
+        target_label: '__address__'
+
+  - job_name: 'node-exporter'
+    scrape_interval: 5s
+    dns_sd_configs:
+      - names:
+          - 'tasks.node-exporter'
+        type: 'A'
+        port: 9100
+    dockerswarm_sd_configs:
+      - host: 'tcp://docker_daemon_proxy:2375'
+        role: 'tasks'
+        refresh_interval: 15s
+    relabel_configs:
+      - source_labels: [__meta_dockerswarm_task_state]
+        regex: 'running'
+        action: keep
+      - source_labels: [__meta_dockerswarm_service_label_prometheus_job]
+        regex: 'node-exporter'
+        action: keep
+      - source_labels: [__meta_dockerswarm_node_hostname]
+        target_label: 'hostname'
+      - source_labels: [__address__]
+        regex: '(.+):\d+'
+        replacement: '${1}:9100'
+        target_label: '__address__'
+
+  - job_name: 'minecraft'
+    dockerswarm_sd_configs:
+      - host: 'tcp://docker_daemon_proxy:2375'
+        role: 'tasks'
+        refresh_interval: 15s
+    relabel_configs:
+      - source_labels: [__meta_dockerswarm_service_label_minecraft_server]
+        regex: 'true'
+        action: keep
+      - source_labels: [__address__]
+        regex: '(.+):\d+'
+        replacement: 'minecraft:9100'
+        target_label: '__address__'
+      - source_labels: [__meta_dockerswarm_service_id]
+        target_label: 'instance'

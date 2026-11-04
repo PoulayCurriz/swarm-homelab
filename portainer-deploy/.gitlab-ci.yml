@@ -1,0 +1,13 @@
+---
+
+stages:
+  - validate
+
+ansible-lint:
+  stage: validate
+  image: registry.gitlab.com/pipeline-components/ansible-lint:latest
+  script:
+    - ansible-lint --show-relpath --exclude .gitlab-ci.yml
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never

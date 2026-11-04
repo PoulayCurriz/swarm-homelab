@@ -1,0 +1,30 @@
+---
+- name: Create portainer group
+  become: true
+  ansible.builtin.group:
+    name: "{{ portainer_group }}"
+    state: present
+  tags:
+    - portainer
+- name: Create portainer user
+  become: true
+  ansible.builtin.user:
+    name: "{{ portainer_user }}"
+    groups: "{{ portainer_group }}"
+    append: true
+    state: present
+  tags:
+    - portainer
+
+- name: Create portainer Folders
+  become: true
+  ansible.builtin.file:
+    state: directory
+    path: "{{ item.path }}"
+    owner: "{{ portainer_user }}"
+    group: "{{ portainer_group }}"
+    mode: "{{ item.mode }}"
+  with_items:
+    - { path: "{{ portainer_host_folder }}", mode: "755" }
+  tags:
+    - portainer

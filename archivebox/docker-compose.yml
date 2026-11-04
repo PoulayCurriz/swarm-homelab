@@ -1,0 +1,82 @@
+---
+services:
+  server:
+    image: archivebox/archivebox:latest
+    volumes:
+        - server_data:/data
+    environment:
+      - ADMIN_USERNAME=admin            # creates an admin user on first run with the given user/pass combo
+      - ALLOWED_HOSTS=*                   # set this to the hostname(s) you're going to serve the site from!
+      - CSRF_TRUSTED_ORIGINS=https://archivebox.home.arpa  # you MUST set this to the server's URL for admin login and the REST API to work
+      - PUBLIC_INDEX=True                 # set to False to prevent anonymous users from viewing snapshot list
+      - PUBLIC_SNAPSHOTS=True             # set to False to prevent anonymous users from viewing snapshot content
+      - PUBLIC_ADD_VIEW=False             # set to True to allow anonymous users to submit new URLs to archive
+      - SEARCH_BACKEND_ENGINE=sonic       # tells ArchiveBox to use sonic container below for fast full-text search
+      - SEARCH_BACKEND_HOST_NAME=sonic
+      - CHECK_SSL_VALIDITY=True         # set to False to disable strict SSL checking (allows saving URLs w/ broken certs)
+    # - PUID=911                        # set to your host user's UID & GID if you encounter permissions issues
+    # - PGID=911                        # UID/GIDs lower than 500 may clash with system uids and are not recommended
+    # For options below, it's better to set in data/ArchiveBox.conf or use `docker compose run archivebox config --set SOME_KEY=someval` instead of setting here:
+    # - MEDIA_MAX_SIZE=750m             # increase this filesize limit to allow archiving larger audio/video files
+    # - TIMEOUT=60                      # increase this number to 120+ seconds if you see many slow downloads timing out
+    # - SAVE_ARCHIVE_DOT_ORG=True       # set to False to disable submitting all URLs to Archive.org when archiving
+    # - USER_AGENT="..."                # set a custom USER_AGENT to avoid being blocked as a bot
+    command:
+      - /bin/bash 
+      - -c 
+      - |
+        export ADMIN_PASSWORD=$$(cat /run/secrets/archivebox_admin_password)
+        export SEARCH_BACKEND_PASSWORD=$$(cat /run/secrets/archivebox_search_backend_password)
+        archivebox server --quick-init 0.0.0.0:8000
+    secrets:
+      - archivebox_admin_password
+      - archivebox_search_backend_password
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == worker.home.arpa
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=homelab"
+        - "traefik.http.routers.archivebox.rule=Host(`archivebox.home.arpa`)"
+        - "traefik.http.routers.archivebox.entrypoints=websecure"
+        - "traefik.http.services.archivebox.loadbalancer.server.port=8000"
+        - "traefik.http.routers.archivebox.service=archivebox"
+        - "traefik.http.routers.archivebox.tls=true"
+    networks:
+      - homelab
+      - internal
+
+  sonic:
+    image: archivebox/sonic:latest
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == worker.home.arpa
+    volumes:
+        - sonic_data:/var/lib/sonic/store
+    networks:
+      - internal
+    secrets:
+      - archivebox_search_backend_password
+    command:
+      - /bin/bash 
+      - -c 
+      - |
+        export SEARCH_BACKEND_PASSWORD=$$(cat /run/secrets/archivebox_search_backend_password)
+        /usr/local/bin/sonic -c /etc/sonic.cfg
+
+networks:
+  homelab:
+    external: true
+  internal:
+
+volumes:
+  server_data:
+  sonic_data:
+
+secrets:
+  archivebox_admin_password:
+    external: true
+  archivebox_search_backend_password:
+    external: true

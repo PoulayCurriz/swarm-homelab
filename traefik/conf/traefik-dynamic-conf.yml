@@ -1,0 +1,56 @@
+---
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/certs/cert.pem
+        keyFile: /etc/traefik/certs/key.pem
+
+http:
+  serversTransports:
+    homelab:
+      rootCAs:
+        - /certs/homelab.crt
+  middlewares:
+    custom-404:
+      errors:
+        status:
+          - "404"
+        service: error-page
+        query: /404.html
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    auth-headers:
+      headers:
+        sslRedirect: true
+        stsSeconds: 315360000
+        browserXssFilter: true
+        contentTypeNosniff: true
+        forceSTSHeader: true
+        sslHost: home.arpa
+        stsIncludeSubdomains: true
+        stsPreload: true
+        frameDeny: true
+    oauth-auth:
+      forwardAuth:
+        address: https://oauth2-proxy.home.arpa/oauth2/auth
+        trustForwardHeader: true
+        tls:
+          ca: /certs/homelab.crt
+    oauth-errors:
+      errors:
+        status:
+          - "401-403"
+        service: oauth2-proxy@swarm
+        query: "/oauth2/sign_in?rd={url}"
+  routers:
+    http-catchall:
+      # yamllint disable-line rule:line-length
+      rule: "HostRegexp(`{host:.+}`) && !Host(`jellyfin-old.home.arpa`)"
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-to-https
+      service: noop@internal

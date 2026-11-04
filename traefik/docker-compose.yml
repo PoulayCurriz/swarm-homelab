@@ -1,0 +1,173 @@
+---
+services:
+  traefik:
+    image: public.ecr.aws/docker/library/traefik:3.7.15
+    networks:
+      - external
+      - homelab
+      - socket
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+      - target: 443
+        published: 443
+        protocol: tcp
+    configs:
+      - source: config_file
+        target: /etc/traefik/traefik.yml
+      - source: dynamic_conf
+        target: /etc/traefik/dynamic_conf/conf.yml
+    secrets:
+      - source: homelab_ssl_certificate
+        target: /etc/traefik/certs/cert.pem
+      - source: homelab_ssl_key
+        target: /etc/traefik/certs/key.pem
+      - source: homelab_root_certificate
+        target: /certs/homelab.crt
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+    deploy:
+      mode: global
+      resources:
+        limits:
+          memory: 150M
+          cpus: "0.5"
+        reservations:
+          memory: 100M
+          cpus: "0.25"
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=homelab"
+        - "traefik.http.routers.traefik.entrypoints=websecure"
+        - "traefik.http.routers.traefik.tls=true"
+        # yamllint disable-line rule:line-length
+        - "traefik.http.routers.traefik.rule=Host(`traefik.home.arpa`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+        - "traefik.http.routers.traefik.service=api@internal"
+        - "traefik.http.routers.traefik.middlewares=auth"
+        # yamllint disable-line rule:line-length
+        - "traefik.http.middlewares.auth.basicauth.users=user:fake_password/"
+        - "traefik.http.services.dummy-svc.loadbalancer.server.port=9999"
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+
+  socket_proxy:
+    image: public.ecr.aws/docker/library/node:lts-alpine
+    networks:
+      - socket
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    configs:
+      - source: socket_server
+        target: /server.js
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role==manager
+      resources:
+        reservations:
+          memory: 32M
+          cpus: "0.1"
+        limits:
+          memory: 64M
+          cpus: "0.2"
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+        max-size: "200k"
+        max-file: "10"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - node server.js
+    environment:
+      - LOG=true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "127.0.0.1:2375/_ping"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+
+  oauth2_proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:latest
+    environment:
+      - OAUTH2_PROXY_PROVIDER=keycloak-oidc
+      - OAUTH2_PROXY_PROVIDER_CA_FILES=/run/secrets/homelab_root_certificate
+      - OAUTH2_PROXY_CLIENT_ID=oauth2-proxy
+      - OAUTH2_PROXY_CLIENT_SECRET_FILE=/run/secrets/oauth2_proxy_client_proxy
+      - OAUTH2_PROXY_OIDC_ISSUER_URL=https://keycloak.home.arpa/realms/master
+      - OAUTH2_PROXY_REDIRECT_URL=https://oauth2-proxy.home.arpa/oauth2/callback
+      - OAUTH2_PROXY_COOKIE_SECRET_FILE=/run/secrets/oauth2_proxy_cookie_secret
+      - OAUTH2_PROXY_COOKIE_DOMAINS=.home.arpa
+      - OAUTH2_PROXY_WHITELIST_DOMAINS=.home.arpa
+      - OAUTH2_PROXY_SCOPE=openid email profile
+      - OAUTH2_PROXY_SET_XAUTHREQUEST=true
+      - OAUTH2_PROXY_PASS_USER_HEADERS=true
+      - OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER=true
+      - OAUTH2_PROXY_REVERSE_PROXY=true
+      - OAUTH2_PROXY_EMAIL_DOMAINS=*
+      - OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256
+    # - OAUTH2_PROXY_ALLOWED-GROUP=prowlarr
+    # yamllint disable-line rule:line-length
+    # - OAUTH2_PROXY_ALLOWED_ROLE=<realm role name> // Optional, required realm role
+    # yamllint disable-line rule:line-length
+    # - OAUTH2_PROXY_ALLOWED_ROLE=<client id>:<client role name> // Optional, required client role
+    networks:
+      - external
+      - homelab
+    secrets:
+      - oauth2_proxy_client_proxy
+      - oauth2_proxy_cookie_secret
+      - homelab_root_certificate
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=homelab"
+        - "traefik.http.routers.oauth2-proxy.entrypoints=websecure"
+        - "traefik.http.routers.oauth2-proxy.tls=true"
+        # yamllint disable-line rule:line-length
+        - "traefik.http.routers.oauth2-proxy.rule=Host(`oauth2-proxy.home.arpa`) && PathPrefix(`/oauth2`)"
+        - "traefik.http.routers.oauth2-proxy.service=oauth2-proxy"
+        - "traefik.http.services.oauth2-proxy.loadbalancer.server.port=4180"
+
+configs:
+  socket_server:
+    file: ./conf/server.js
+  config_file:
+    file: ./conf/traefik.yml
+  dynamic_conf:
+    file: ./conf/traefik-dynamic-conf.yml
+  error_page_404:
+    file: ./conf/404.html
+
+secrets:
+  homelab_root_certificate:
+    external: true
+  homelab_ssl_certificate:
+    external: true
+  homelab_ssl_key:
+    external: true
+  oauth2_proxy_client_proxy:
+    external: true
+  oauth2_proxy_cookie_secret:
+    external: true
+
+networks:
+  external:
+    driver: overlay
+  homelab:
+    external: true
+  socket:
+    driver: overlay
+    internal: true

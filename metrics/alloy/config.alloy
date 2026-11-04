@@ -1,0 +1,81 @@
+local.file_match "system" {
+  path_targets = [{
+    __address__ = "localhost",
+    __path__    = "/var/log/*log",
+    job         = "varlogs",
+  }]
+  sync_period = "5s"
+}
+
+loki.source.file "system" {
+  targets               = local.file_match.system.targets
+  forward_to            = [loki.write.default.receiver]
+  legacy_positions_file = "/tmp/positions.yaml"
+  tail_from_end = true
+}
+
+local.file_match "containers" {
+  path_targets = [{
+    __address__ = "localhost",
+    __path__    = "/var/lib/docker/containers/*/*log",
+    job         = "containerlogs",
+  }]
+}
+
+loki.process "containers" {
+  forward_to = [loki.write.default.receiver]
+
+  stage.json {
+    expressions = {
+      compose_project    = "attrs.\"com.docker.compose.project\"",
+      compose_service    = "attrs.\"com.docker.compose.service\"",
+      log                = "log",
+      stack_name         = "attrs.\"com.docker.stack.namespace\"",
+      stream             = "stream",
+      swarm_service_name = "attrs.\"com.docker.swarm.service.name\"",
+      swarm_task_name    = "attrs.\"com.docker.swarm.task.name\"",
+      tag                = "attrs.tag",
+      time               = "time",
+    }
+  }
+
+  stage.regex {
+    expression = "^/var/lib/docker/containers/(?P<container_id>.{12}).+/.+-json.log$"
+    source     = "filename"
+  }
+
+  stage.timestamp {
+    source = "time"
+    format = "RFC3339Nano"
+  }
+
+  stage.labels {
+    values = {
+      compose_project    = null,
+      compose_service    = null,
+      container_id       = null,
+      stack_name         = null,
+      stream             = null,
+      swarm_service_name = null,
+      swarm_task_name    = null,
+      tag                = null,
+    }
+  }
+
+  stage.output {
+    source = "log"
+  }
+}
+
+loki.source.file "containers" {
+  targets               = local.file_match.containers.targets
+  forward_to            = [loki.process.containers.receiver]
+  legacy_positions_file = "/tmp/positions.yaml"
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+  external_labels = {}
+}

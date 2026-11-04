@@ -1,0 +1,72 @@
+---
+services:
+  server:
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == manager3.home.arpa
+      resources:
+        reservations:
+          cpus: '0.25'
+          memory: 15M
+        limits:
+          memory: 30M
+          cpus: '0.5'
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=homelab"
+        - "traefik.http.routers.actual.rule=Host(`actual.home.arpa`)"
+        - "traefik.http.routers.actual.entrypoints=websecure"
+        - "traefik.http.services.actual.loadbalancer.server.port=5006"
+        - "traefik.http.routers.actual.service=actual"
+        - "traefik.http.routers.actual.tls=true"
+    image: ghcr.io/actualbudget/actual-server:26.11.0-alpine
+    environment:
+      ACTUAL_PORT: 5006
+      # yamllint disable-line rule:line-length
+      ACTUAL_OPENID_DISCOVERY_URL: https://keycloak.home.arpa/realms/master/.well-known/openid-configuration
+      ACTUAL_OPENID_CLIENT_ID: actual
+      ACTUAL_OPENID_SERVER_HOSTNAME: https://actual.home.arpa
+      NODE_EXTRA_CA_CERTS: /run/secrets/homelab_root_certificate
+# yamllint disable rule:line-length
+    command:
+      - /bin/sh
+      - -c
+      - |
+        export ACTUAL_OPENID_CLIENT_SECRET=$$(cat /run/secrets/actual_keycloak_client_secret)
+        node app.js
+# yamllint enable rule:line-length
+    secrets:
+      - actual_keycloak_client_secret
+      - homelab_root_certificate
+    volumes:
+      - data:/data
+    networks:
+      - homelab
+      - internal
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+        max-size: "200k"
+        max-file: "10"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "localhost:5006"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+
+secrets:
+  actual_keycloak_client_secret:
+    external: true
+  homelab_root_certificate:
+    external: true
+
+volumes:
+  data:
+
+networks:
+  internal:
+  homelab:
+    external: true

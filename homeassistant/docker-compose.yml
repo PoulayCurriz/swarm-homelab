@@ -1,0 +1,61 @@
+---
+services:
+  hass:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    deploy:
+      placement:
+        constraints:
+          - node.labels.schedulable == true
+          - node.hostname == manager3.home.arpa
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=homelab"
+        - "traefik.http.routers.hass-http.entrypoints=web"
+        - "traefik.http.routers.hass-http.rule=Host(`hass.home.arpa`)"
+        - "traefik.http.routers.hass-http.middlewares=hass-https"
+        - "traefik.http.middlewares.hass-https.redirectscheme.scheme=https"
+        - "traefik.http.routers.hass.rule=Host(`hass.home.arpa`)"
+        - "traefik.http.routers.hass.entrypoints=websecure"
+        - "traefik.http.services.hass.loadbalancer.server.port=8123"
+        - "traefik.http.routers.hass.service=hass"
+        - "traefik.http.routers.hass.tls=true"
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+        max-size: "200k"
+        max-file: "10"
+    environment:
+      - TZ=Europe/Paris
+    configs:
+      - source: hass_config
+        target: /config/configuration.yaml
+      - source: hass_auth_script
+        target: /config/lldap-ha-auth.sh
+    volumes:
+      - hass_config:/config
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    networks:
+      - hass
+      - homelab
+    healthcheck:
+      test: ["CMD", "curl", "-sSL", "localhost:8123"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+
+configs:
+  hass_config:
+    file: conf/hass-configuration.yaml
+  hass_auth_script:
+    file: conf/lldap-ha-auth.sh
+
+volumes:
+  hass_config:
+
+networks:
+  hass:
+    external: true
+  homelab:
+    external: true

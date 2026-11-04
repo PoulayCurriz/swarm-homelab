@@ -1,0 +1,75 @@
+version: "3"
+
+networks:
+  gitea:
+    internal: true
+  web_access:
+  homelab:
+    external: true
+
+secrets:
+  homelab_root_certificate:
+    external: true
+  gitea_database_password:
+    external: true
+  homelab_smtp_password:
+    external: true
+
+volumes:
+  data:
+
+services:
+  server:
+    image: docker.gitea.com/gitea:1.25.4
+    environment:
+      USER_UID: 1000
+      USER_GID: 1000
+      GITEA__database__DB_TYPE: postgres
+      GITEA__database__HOST: postgres:5432
+      GITEA__database__NAME: gitea
+      GITEA__database__USER: gitea
+      GITEA__database__PASSWD__FILE: /run/secrets/gitea_database_password
+      GITEA__mailer__ENABLED: "true"
+      GITEA__mailer__FROM: no-reply@example.com
+      GITEA__mailer__PROTOCOL: smtps
+      GITEA__mailer__SMTP_ADDR: mail-eu.smtp2go.com
+      GITEA__mailer__SMTP_PORT: 465
+      GITEA__mailer__USER: name
+      GITEA__mailer__PASSWD__FILE: /run/secrets/homelab_smtp_password
+    networks:
+      - gitea
+      - web_access
+      - homelab
+    volumes:
+      - data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    secrets:
+      - source: homelab_root_certificate
+        target: /etc/ssl/certs/homelab.crt
+      - gitea_database_password
+      - homelab_smtp_password
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=homelab"
+        - "traefik.http.routers.gitea.rule=Host(`gitea.home.arpa`)"
+        - "traefik.http.routers.gitea.entrypoints=websecure"
+        - "traefik.http.routers.gitea.service=gitea"
+        - "traefik.http.routers.gitea.tls=true"
+        - "traefik.http.services.gitea.loadbalancer.server.port=3000"
+    ports:
+      - "2222:22"
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=gitea
+      - POSTGRES_PASSWORD_FILE=/run/secrets/gitea_database_password
+      - POSTGRES_DB=gitea
+    secrets:
+      - gitea_database_password
+    networks:
+      - gitea
+    volumes:
+      - /opt/data/docker/gitea:/var/lib/postgresql/data

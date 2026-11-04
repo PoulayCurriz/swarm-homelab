@@ -1,0 +1,106 @@
+---
+services:
+  minecraft:
+    image: ghcr.io/itzg/minecraft-server:java21-alpine
+    deploy:
+      resources:
+        reservations:
+          cpus: '1'
+          memory: 4096M
+        limits:
+          memory: 5120M
+          cpus: '3'
+      placement:
+        constraints:
+          - node.hostname == worker.home.arpa
+          - node.labels.schedulable == true
+      labels:
+        - "minecraft.server=true"
+    environment:
+      TZ: Europe/Paris
+      EULA: "true"
+      MEMORY: 4G
+      USE_AIKAR_FLAGS: "true"
+      ENABLE_ROLLING_LOGS: "true"
+      SERVER_NAME: "Realm"
+      DIFFICULTY: normal
+      VIEW_DISTANCE: "20"
+      TYPE: FABRIC
+      VERSION: "1.21.10"
+      PLUGINS: |
+        https://github.com/Cubxity/UnifiedMetrics/releases/download/v0.3.8/unifiedmetrics-platform-fabric-0.3.8.jar
+        https://cdn.modrinth.com/data/P7dR8mSH/versions/dQ3p80zK/fabric-api-0.138.3%2B1.21.10.jar
+        https://cdn.modrinth.com/data/gvQqBUqZ/versions/NsswKiwi/lithium-fabric-0.20.1%2Bmc1.21.10.jar
+        https://cdn.modrinth.com/data/Ha28R6CL/versions/LcgnDDmT/fabric-language-kotlin-1.13.7%2Bkotlin.2.2.21.jar
+        https://cdn.modrinth.com/data/VSNURh3q/versions/uNick7oj/c2me-fabric-mc1.21.10-0.3.5.1.0.jar
+        https://cdn.modrinth.com/data/Ps1zyz6x/versions/PV9KcrYQ/ScalableLux-0.1.6%2Bfabric.c25518a-all.jar
+        https://cdn.modrinth.com/data/sml2FMaA/versions/EHGIPeW9/antixray-fabric-1.4.10%2B1.21.9.jar
+        https://cdn.modrinth.com/data/l6YH9Als/versions/eqIoLvsF/spark-1.10.152-fabric.jar
+        https://cdn.modrinth.com/data/YlKdE5VK/versions/kdVGOJPv/ViaFabric-0.4.20%2B126-main.jar
+        https://cdn.modrinth.com/data/wKkoqHrH/versions/WRvXSuOz/geyser-fabric-Geyser-Fabric-2.9.1-b999.jar
+        https://cdn.modrinth.com/data/uCdwusMi/versions/9Y10ZuWP/DistantHorizons-2.3.6-b-1.21.10-fabric-neoforge.jar
+        https://cdn.modrinth.com/data/qQyHxfxd/versions/78RjC1gi/NoChatReports-FABRIC-1.21.10-v2.16.0.jar
+        https://cdn.modrinth.com/data/bWrNNfkb/versions/QFAMeMNB/Floodgate-Fabric-2.2.6-b51.jar
+        https://cdn.modrinth.com/data/7LEWYKTV/versions/oe5KEgWu/RecipeCooldown-1.0.0.jar
+        https://cdn.modrinth.com/data/uXXizFIs/versions/MGoveONm/ferritecore-8.0.2-fabric.jar
+      # https://cdn.modrinth.com/data/fQEb0iXm/versions/O9LmWYR7/krypton-0.2.10.jar
+      ENABLE_WHITELIST: "true"
+      WHITELIST_FILE: "/data/whitelist.json"
+    ports:
+      - target: 25565
+        published: 25565
+        protocol: tcp
+      - target: 25565
+        published: 25565
+        protocol: udp
+      - target: 19132
+        published: 19132
+        protocol: udp
+    networks:
+      - internal
+      - metrics_private
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+        max-size: "200k"
+        max-file: "10"
+    configs:
+      - source: minecraft_ops
+        target: /data/ops.json
+      - source: minecraft_whitelist
+        target: /data/whitelist.json
+      - source: minecraft_geyser
+        target: /data/config/Geyser-Fabric/config.yml
+      - source: minecraft_floodgate
+        target: /data/config/floodgate/config.yml
+      - source: minecraft_viaversion
+        target: /data/config/ViaFabric/viaversion.yml
+    volumes:
+      - fabric:/data
+    healthcheck:
+      test: mc-health
+      start_period: 1m
+      interval: 5s
+      retries: 20
+
+networks:
+  internal:
+    driver: overlay
+  metrics_private:
+    external: true
+
+configs:
+  minecraft_ops:
+    file: ./conf/ops.json
+  minecraft_whitelist:
+    file: ./conf/whitelist.json
+  minecraft_geyser:
+    file: ./conf/geyser-config.yml
+  minecraft_floodgate:
+    file: ./conf/floodgate-config.yml
+  minecraft_viaversion:
+    file: ./conf/viaversion.yml
+
+volumes:
+  fabric:

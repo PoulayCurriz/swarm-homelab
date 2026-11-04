@@ -1,0 +1,83 @@
+volumes:
+  lldap_data:
+
+#configs:
+#  config:
+#    file: ./lldap_config.toml
+
+secrets:
+  lldap_jwt_token:
+    external: true
+  lldap_key:
+    external: true
+  lldap_admin_user_password:
+    external: true
+  lldap_smtp_password:
+    external: true
+  homelab_ssl_certificate:
+    external: true
+  homelab_ssl_key:
+    external: true
+
+networks:
+  homelab:
+    external: true
+  internal:
+
+services:
+  lldap:
+    image: ghcr.io/lldap/lldap:v0.6.3-alpine
+    deploy:
+      placement:
+        constraints:
+          - node.labels.schedulable == true
+          - node.hostname == worker.home.arpa
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=homelab"
+        - "traefik.http.routers.lldap.rule=Host(`lldap.home.arpa`)"
+        - "traefik.http.routers.lldap.entrypoints=websecure"
+        - "traefik.http.services.lldap.loadbalancer.server.port=17170"
+        - "traefik.http.routers.lldap.service=lldap"
+        - "traefik.http.routers.lldap.tls=true"
+    volumes:
+      - "lldap_data:/data"
+    ports:
+      - 6360:6360
+    environment:
+      TZ: Europe/Paris
+      LLDAP_HTTP_URL: https://lldap.home.arpa
+      LLDAP_LDAP_BASE_DN: dc=home,dc=arpa
+      LLDAP_JWT_SECRET_FILE: /run/secrets/lldap_jwt_token
+      LLDAP_KEY_SEED_FILE: /run/secrets/lldap_key
+      LLDAP_LDAP_USER_PASS_FILE: /run/secrets/lldap_admin_user_password
+      LLDAP_LDAPS_OPTIONS__ENABLED: "true"
+      LLDAP_LDAPS_OPTIONS__CERT_FILE: /run/secrets/homelab_ssl_certificate
+      LLDAP_LDAPS_OPTIONS__KEY_FILE: /run/secrets/homelab_ssl_key
+      LLDAP_SMTP_OPTIONS__ENABLE_PASSWORD_RESET: "true"
+      LLDAP_SMTP_OPTIONS__SERVER: mail-eu.smtp2go.com
+      LLDAP_SMTP_OPTIONS__PORT: 465
+      LLDAP_SMTP_OPTIONS__SMTP_ENCRYPTION: TLS
+      LLDAP_SMTP_OPTIONS__USER: name
+      LLDAP_SMTP_OPTIONS__PASSWORD_FILE: /run/secrets/lldap_smtp_password
+      LLDAP_SMTP_OPTIONS__FROM: no-reply <no-reply@example.com>
+      LLDAP_SMTP_OPTIONS__TO: admin <admin@example.com>
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+        max-size: "200k"
+        max-file: "10"
+    #configs:
+    #  - source: config
+    #    target: /data/lldap_config.toml
+    secrets:
+      - lldap_jwt_token
+      - lldap_key
+      - lldap_admin_user_password
+      - lldap_smtp_password
+      - homelab_ssl_certificate
+      - homelab_ssl_key
+    networks:
+      - homelab
+      - internal

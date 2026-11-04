@@ -1,0 +1,27 @@
+---
+- name: Replace base CentOS yum repo
+  ansible.builtin.template:
+    src: yum.repo.j2
+    dest: /etc/yum.repos.d/CentOS-Base.repo
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install Python 3
+  ansible.builtin.dnf:
+    name:
+      - python3
+      - python3-pip
+    update_cache: true
+    use_backend: dnf4
+
+- name: Upgrade pip
+  ansible.builtin.command: "{{ ansible_python_interpreter }} install --upgrade pip"
+  register: pip_upgrade
+  changed_when: pip_upgrade.rc == 0
+
+- name: Install Python 3 lib
+  ansible.builtin.pip:
+    name: '{{ item.name }}=={{ item.version }}'
+  with_items:
+    - { name: jsondiff, version: '2.0.0' }

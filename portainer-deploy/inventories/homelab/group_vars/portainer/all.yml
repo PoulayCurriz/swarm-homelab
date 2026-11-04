@@ -1,0 +1,21 @@
+ansible_user: name
+extra_certificates:
+  - { name: 'homelab_root_certificate' }
+extra_networks:
+  - { name: 'homelab', external: 'true' }
+  - { name: 'external', external: 'false' }
+extra_constraints:
+  - { rule: 'node.hostname == manager1.home.arpa' }
+  - { rule: 'node.labels.schedulable == true' }
+docker_labels:
+  - { rule: "traefik.enable=true" }
+  - { rule: "traefik.swarm.network=homelab" }
+  - { rule: "traefik.http.routers.frontend-http.entrypoints=web" }
+  - { rule: "traefik.http.routers.frontend-http.rule=Host(`portainer.home.arpa`)" }
+  - { rule: "traefik.http.routers.frontend-http.middlewares=frontend-https" }
+  - { rule: "traefik.http.middlewares.frontend-https.redirectscheme.scheme=https" }
+  - { rule: "traefik.http.routers.frontend.rule=Host(`portainer.home.arpa`)" }
+  - { rule: "traefik.http.routers.frontend.entrypoints=websecure" }
+  - { rule: "traefik.http.services.frontend.loadbalancer.server.port=9000" }
+  - { rule: "traefik.http.routers.frontend.service=frontend" }
+  - { rule: "traefik.http.routers.frontend.tls=true" }

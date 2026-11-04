@@ -1,0 +1,94 @@
+networks:
+  homelab:
+    external: true
+  internal:
+
+secrets:
+  homelab_root_certificate:
+    external: true
+  llm_webui_secret_key:
+    external: true
+  llm_keycloak_secret:
+    external: true
+
+volumes:
+  ollama:
+  open-webui:
+
+services:
+  ollama:
+    image: ollama/ollama:0.40.8
+    volumes:
+      - ollama:/root/.ollama
+    networks:
+      - internal
+      - homelab
+    environment:
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_NUM_THREADS: "4"
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=homelab"
+        - "traefik.http.routers.ollama.rule=Host(`ollama.home.arpa`)"
+        - "traefik.http.routers.ollama.entrypoints=websecure"
+        - "traefik.http.services.ollama.loadbalancer.server.port=11434"
+        - "traefik.http.routers.ollama.service=ollama"
+        - "traefik.http.routers.ollama.tls=true"
+      placement:
+        constraints:
+          - node.hostname == worker.home.arpa
+          - node.labels.schedulable == true
+      resources:
+        limits:
+          memory: 28G
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:0.12.3
+    networks:
+      - homelab
+      - internal
+    secrets:
+      - llm_keycloak_secret
+      - llm_webui_secret_key
+      - source: homelab_root_certificate
+        target: /usr/local/share/ca-certificates/homelab.crt
+    volumes:
+      - open-webui:/app/backend/data
+    environment:
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+      PIP_CERT: /etc/ssl/certs/ca-certificates.crt
+      OLLAMA_BASE_URL: http://ollama:11434
+      WEBUI_SECRET_KEY_FILE: /run/secrets/llm_webui_secret_key
+      ENABLE_LOGIN_FORM: "false"
+      ENABLE_OAUTH_SIGNUP: "true"
+      ENABLE_OAUTH_GROUP_MANAGEMENT: "true"
+      ENABLE_OAUTH_GROUP_CREATION: "true"
+      OAUTH_CLIENT_ID: llm
+      OAUTH_PROVIDER_NAME: Keycloak
+      OAUTH_GROUP_CLAIM: llm_user
+      OPENID_PROVIDER_URL: https://keycloak.home.arpa/realms/master/.well-known/openid-configuration
+      OPENID_REDIRECT_URI: https://llm.home.arpa/oauth/oidc/callback
+    command:
+      - /bin/bash
+      - -c
+# yamllint disable rule:line-length
+      - |
+        export OAUTH_CLIENT_SECRET=$$(cat /run/secrets/llm_keycloak_secret)
+        update-ca-certificates
+        /app/backend/start.sh
+# yamllint enable rule:line-length
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == manager3.home.arpa
+          - node.labels.schedulable == true
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=homelab"
+        - "traefik.http.routers.open-webui.rule=Host(`llm.home.arpa`)"
+        - "traefik.http.routers.open-webui.entrypoints=websecure"
+        - "traefik.http.services.open-webui.loadbalancer.server.port=8080"
+        - "traefik.http.routers.open-webui.service=open-webui"
+        - "traefik.http.routers.open-webui.tls=true"

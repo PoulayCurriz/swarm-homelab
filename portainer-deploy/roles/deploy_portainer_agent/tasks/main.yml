@@ -1,0 +1,23 @@
+---
+- name: Copy Portainer compose file to host
+  become: true
+  tags:
+    - portainer
+  ansible.builtin.template:
+    src: "portainer-stack-agent.yml.j2"
+    dest: "{{ portainer_host_folder }}/portainer-stack-agent.yml"
+    mode: "664"
+
+- name: Deploy Portainer Services
+  tags:
+    - portainer
+  become: true
+  community.docker.docker_stack:
+    state: present
+    name: "portainer"
+    compose:
+      - "{{ portainer_host_folder }}/portainer-stack-agent.yml"
+  register: portainer_service_deploy
+  retries: 3
+  delay: 5
+  until: portainer_service_deploy is not failed

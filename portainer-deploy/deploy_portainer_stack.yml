@@ -1,0 +1,9 @@
+- name: Deploy Portainer stack agent
+  hosts: "portainer"
+  any_errors_fatal: true
+  roles:
+    - role: install_requirements
+      tags: always
+    - role: create_folders
+    - role: deploy_portainer_agent
+    - role: deploy_portainer_server

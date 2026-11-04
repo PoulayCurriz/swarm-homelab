@@ -1,0 +1,400 @@
+---
+services:
+
+  cadvisor:
+    image: ghcr.io/google/cadvisor:0.60.5
+    command: -logtostderr -docker_only -housekeeping_interval=15s
+    environment:
+      TZ: Europe/Paris
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /etc/machine-id:/etc/machine-id:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - private
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+        max-size: "200k"
+        max-file: "10"
+    deploy:
+      mode: global
+      resources:
+        reservations:
+          memory: 32M
+          cpus: "0.01"
+        limits:
+          memory: 64M
+          cpus: "0.25"
+      placement:
+        constraints:
+          - node.labels.schedulable == true
+      labels:
+        prometheus-job: cadvisor
+        prometheus-job-port: 8080
+        traefik.enable: "false"
+
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:v1.12.1-distroless
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - /etc/hostname:/etc/hostname:ro
+    environment:
+      HOST_HOSTNAME: /etc/host_hostname
+      TZ: Europe/Paris
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.udev.data=/rootfs/run/udev/data'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - private
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+        max-size: "200k"
+        max-file: "10"
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.labels.schedulable == true
+      resources:
+        reservations:
+          memory: 32M
+          cpus: "0.02"
+        limits:
+          memory: 48M
+          cpus: "0.4"
+      labels:
+        traefik.enable: "false"
+        prometheus-job: node-exporter
+        prometheus-job-port: 9100
+
+  docker_daemon_proxy:
+    image: node:lts-alpine
+    networks:
+      - proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == manager
+          - node.labels.schedulable == true
+      resources:
+        reservations:
+          memory: 32M
+          cpus: "0.01"
+        limits:
+          memory: 48M
+          cpus: "0.2"
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+        max-size: "200k"
+        max-file: "10"
+    configs:
+      - source: socket_proxy_server
+        target: /usr/src/app/server.js
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - node /usr/src/app/server.js
+    environment:
+      LOG: "true"
+      TZ: Europe/Paris
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "127.0.0.1:2375/_ping"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+
+  prometheus:
+    image: quay.io/prometheus/prometheus:v3.15.1-distroless
+    volumes:
+      - prometheus_config:/etc/prometheus
+      - prometheus_data:/prometheus
+    configs:
+      - source: prometheus_config
+        target: /etc/prometheus/prometheus.yml
+    healthcheck:
+      test: ["CMD", "/bin/promtool", "check", "healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--log.level=debug'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+    environment:
+      TZ: Europe/Paris
+    networks:
+      - private
+      - proxy
+      - homelab
+    depends_on:
+      - docker_daemon_proxy
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+        max-size: "200k"
+        max-file: "10"
+    deploy:
+      placement:
+        constraints:
+          - node.labels.schedulable == true
+          - node.role == manager
+      resources:
+        reservations:
+          memory: 512M
+          cpus: "0.05"
+        limits:
+          memory: 512M
+          cpus: "0.5"
+      labels:
+        - "traefik.enable=false"
+        - "traefik.swarm.network=homelab"
+        - "traefik.http.routers.prometheus.rule=Host(`prometheus.home.arpa`)"
+        - "traefik.http.routers.prometheus.entrypoints=websecure"
+        - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+        - "traefik.http.routers.prometheus.service=prometheus"
+        - "traefik.http.routers.prometheus.tls=true"
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.schedulable == true
+          - node.role == manager
+      resources:
+        reservations:
+          memory: 256M
+          cpus: "0.01"
+        limits:
+          memory: 384M
+          cpus: "0.2"
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=homelab"
+        - "traefik.http.routers.grafana.rule=Host(`grafana.home.arpa`)"
+        - "traefik.http.routers.grafana.entrypoints=websecure"
+        - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+        - "traefik.http.routers.grafana.service=grafana"
+        - "traefik.http.routers.grafana.tls=true"
+    healthcheck:
+      test: ["CMD", "/usr/share/grafana/bin/grafana", "cli", "plugins", "ls"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+    # yamllint disable rule:line-length
+    environment:
+      TZ: Europe/Paris
+      SSL_CERT_FILE: /usr/local/share/ca-certificates/homelab.crt
+      GF_SERVER_DOMAIN: grafana.home.arpa
+      GF_SERVER_ROOT_URL: https://grafana.home.arpa
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/swarm_metrics_dashboard.json
+      GF_USERS_DEFAULT_THEME: system
+      GF_AUTH_DISABLE_LOGIN_FORM: 'true'
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_AUTH_OAUTH_AUTO_LOGIN: 'true'
+      GF_AUTH_GENERIC_OAUTH_ENABLED: 'true'
+      GF_AUTH_GENERIC_OAUTH_NAME: Keycloak
+      GF_AUTH_GENERIC_OAUTH_CLIENT_ID: grafana-oauth
+      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET__FILE: /run/secrets/grafana_keycloak_client_secret
+      GF_AUTH_GENERIC_OAUTH_SCOPES: openid email profile
+      GF_AUTH_GENERIC_OAUTH_AUTH_URL: https://keycloak.home.arpa/realms/master/protocol/openid-connect/auth
+      GF_AUTH_GENERIC_OAUTH_TOKEN_URL: https://keycloak.home.arpa/realms/master/protocol/openid-connect/token
+      GF_AUTH_GENERIC_OAUTH_API_URL: https://keycloak.home.arpa/realms/master/protocol/openid-connect/userinfo
+      GF_AUTH_GENERIC_OAUTH_SIGNOUT_REDIRECT_URL: https://keycloak.home.arpa/realms/master/protocol/openid-connect/logout
+      GF_AUTH_GENERIC_OAUTH_ALLOW_SIGN_UP: 'true'
+      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH: contains(realm_access.roles[*], 'admin') && 'Admin' || contains(realm_access.roles[*], 'editor') && 'Editor' || 'Viewer'
+    # yamllint enable rule:line-length
+    secrets:
+      - grafana_admin_password
+      - grafana_keycloak_client_secret
+      - source: homelab_root_certificate
+        target: /usr/local/share/ca-certificates/homelab.crt
+    volumes:
+      - grafana_data:/var/lib/grafana
+    configs:
+      - source: grafana_ldap_config
+        target: /etc/grafana/ldap.toml
+      - source: grafana_etc
+        target: /etc/grafana/provisioning/dashboards/etc.yml
+      - source: grafana_prometheus_datasource
+        target: /etc/grafana/provisioning/datasources/prom.yml
+      - source: grafana_loki_datasource
+        target: /etc/grafana/provisioning/datasources/loki.yml
+      - source: grafana_unified_dashboard
+        target: /etc/grafana/dashboards/unifiedMetrics-0.3.X.json
+      - source: grafana_swarm_dashboard
+        target: /etc/grafana/dashboards/swarm_metrics_dashboard.json
+      - source: grafana_log_dashboard
+        target: /etc/grafana/dashboards/container_log_dashboard.json
+    depends_on:
+      - prometheus
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+        max-size: "200k"
+        max-file: "10"
+    networks:
+      - private
+      - external
+      - homelab
+
+  loki:
+    image: grafana/loki:3.7.9
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.schedulable == true
+          - node.role == manager
+      resources:
+        reservations:
+          memory: 192M
+          cpus: "0.05"
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    healthcheck:
+      test: ["CMD", "/usr/bin/loki", "-health"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: -config.file=/etc/loki/local-config.yaml
+    environment:
+      TZ: Europe/Paris
+    configs:
+      - source: loki_config
+        target: /etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/data/loki
+    logging:
+      driver: "json-file"
+      options:
+        labels-regex: "^.+"
+        max-size: "200k"
+        max-file: "10"
+    networks:
+      - private
+
+  alloy:
+    image: grafana/alloy:v1.21.3
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.labels.schedulable == true
+      resources:
+        reservations:
+          memory: 64M
+          cpus: "0.01"
+        limits:
+          memory: 128M
+          cpus: "0.2"
+      labels:
+        - "traefik.enable=false"
+        - "traefik.swarm.network=homelab"
+        - "traefik.http.routers.alloy.rule=Host(`alloy.home.arpa`)"
+        - "traefik.http.routers.alloy.entrypoints=websecure"
+        - "traefik.http.services.alloy.loadbalancer.server.port=12345"
+        - "traefik.http.routers.alloy.priority=40"
+        - "traefik.http.routers.alloy.service=alloy"
+        - "traefik.http.routers.alloy.tls=true"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/12345"]
+      start_period: 10s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+    depends_on:
+      - loki
+    environment:
+      TZ: Europe/Paris
+      ALLOY_DEPLOY_MODE: docker
+    configs:
+      - source: alloy_config
+        target: /etc/alloy/config.alloy
+    volumes:
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: >
+      run --server.http.listen-addr=0.0.0.0:12345
+          --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+    networks:
+      - private
+      - proxy
+
+networks:
+  external:
+    driver: overlay
+  private:
+    driver: overlay
+    internal: true
+    attachable: true
+  proxy:
+    driver: overlay
+    internal: true
+    attachable: false
+  homelab:
+    external: true
+
+volumes:
+  prometheus_config:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+
+secrets:
+  homelab_root_certificate:
+    external: true
+  grafana_admin_password:
+    external: true
+  grafana_keycloak_client_secret:
+    external: true
+
+configs:
+  socket_proxy_server:
+    file: ./server.js
+  prometheus_config:
+    file: ./prometheus/prometheus.yml
+  grafana_prometheus_datasource:
+    file: ./grafana/prometheus-datasource.yml
+  grafana_loki_datasource:
+    file: ./grafana/loki-datasource.yml
+  grafana_unified_dashboard:
+    file: ./grafana/14756_rev11.json
+  grafana_swarm_dashboard:
+    file: ./grafana/13496_rev1.json
+  grafana_log_dashboard:
+    file: ./grafana/16966_rev1.json
+  grafana_etc:
+    file: ./grafana/etc.yml
+  grafana_ldap_config:
+    file: ./grafana/ldap.toml
+  loki_config:
+    file: ./loki/loki-local-config.yaml
+  alloy_config:
+    file: ./alloy/config.alloy
