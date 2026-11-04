@@ -99,48 +99,6 @@ services:
       retries: 5
       timeout: 3s
 
-  oauth2_proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:latest
-    environment:
-      - OAUTH2_PROXY_PROVIDER=keycloak-oidc
-      - OAUTH2_PROXY_PROVIDER_CA_FILES=/run/secrets/homelab_root_certificate
-      - OAUTH2_PROXY_CLIENT_ID=oauth2-proxy
-      - OAUTH2_PROXY_CLIENT_SECRET_FILE=/run/secrets/oauth2_proxy_client_proxy
-      - OAUTH2_PROXY_OIDC_ISSUER_URL=https://keycloak.home.arpa/realms/master
-      - OAUTH2_PROXY_REDIRECT_URL=https://oauth2-proxy.home.arpa/oauth2/callback
-      - OAUTH2_PROXY_COOKIE_SECRET_FILE=/run/secrets/oauth2_proxy_cookie_secret
-      - OAUTH2_PROXY_COOKIE_DOMAINS=.home.arpa
-      - OAUTH2_PROXY_WHITELIST_DOMAINS=.home.arpa
-      - OAUTH2_PROXY_SCOPE=openid email profile
-      - OAUTH2_PROXY_SET_XAUTHREQUEST=true
-      - OAUTH2_PROXY_PASS_USER_HEADERS=true
-      - OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER=true
-      - OAUTH2_PROXY_REVERSE_PROXY=true
-      - OAUTH2_PROXY_EMAIL_DOMAINS=*
-      - OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256
-    # - OAUTH2_PROXY_ALLOWED-GROUP=prowlarr
-    # yamllint disable-line rule:line-length
-    # - OAUTH2_PROXY_ALLOWED_ROLE=<realm role name> // Optional, required realm role
-    # yamllint disable-line rule:line-length
-    # - OAUTH2_PROXY_ALLOWED_ROLE=<client id>:<client role name> // Optional, required client role
-    networks:
-      - external
-      - homelab
-    secrets:
-      - oauth2_proxy_client_proxy
-      - oauth2_proxy_cookie_secret
-      - homelab_root_certificate
-    deploy:
-      labels:
-        - "traefik.enable=true"
-        - "traefik.swarm.network=homelab"
-        - "traefik.http.routers.oauth2-proxy.entrypoints=websecure"
-        - "traefik.http.routers.oauth2-proxy.tls=true"
-        # yamllint disable-line rule:line-length
-        - "traefik.http.routers.oauth2-proxy.rule=Host(`oauth2-proxy.home.arpa`) && PathPrefix(`/oauth2`)"
-        - "traefik.http.routers.oauth2-proxy.service=oauth2-proxy"
-        - "traefik.http.services.oauth2-proxy.loadbalancer.server.port=4180"
-
 configs:
   socket_server:
     file: ./conf/server.js
@@ -157,10 +115,6 @@ secrets:
   homelab_ssl_certificate:
     external: true
   homelab_ssl_key:
-    external: true
-  oauth2_proxy_client_proxy:
-    external: true
-  oauth2_proxy_cookie_secret:
     external: true
 
 networks:

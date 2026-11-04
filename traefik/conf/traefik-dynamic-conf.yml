@@ -33,18 +33,6 @@ http:
         stsIncludeSubdomains: true
         stsPreload: true
         frameDeny: true
-    oauth-auth:
-      forwardAuth:
-        address: https://oauth2-proxy.home.arpa/oauth2/auth
-        trustForwardHeader: true
-        tls:
-          ca: /certs/homelab.crt
-    oauth-errors:
-      errors:
-        status:
-          - "401-403"
-        service: oauth2-proxy@swarm
-        query: "/oauth2/sign_in?rd={url}"
   routers:
     http-catchall:
       # yamllint disable-line rule:line-length

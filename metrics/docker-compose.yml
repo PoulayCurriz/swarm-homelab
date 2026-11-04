@@ -234,8 +234,6 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
     configs:
-      - source: grafana_ldap_config
-        target: /etc/grafana/ldap.toml
       - source: grafana_etc
         target: /etc/grafana/provisioning/dashboards/etc.yml
       - source: grafana_prometheus_datasource
@@ -392,8 +390,6 @@ configs:
     file: ./grafana/16966_rev1.json
   grafana_etc:
     file: ./grafana/etc.yml
-  grafana_ldap_config:
-    file: ./grafana/ldap.toml
   loki_config:
     file: ./loki/loki-local-config.yaml
   alloy_config:

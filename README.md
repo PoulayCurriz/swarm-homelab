@@ -26,12 +26,17 @@ flowchart LR
 - **Ingress:** Traefik discovers services through Swarm labels, using a read-only proxy instead of the raw Docker socket (`traefik/conf/server.js`).
 - **TLS:** a private root CA signs the certificate that Traefik serves. Services that call each other over HTTPS trust that CA through a Swarm secret.
 - **Secrets:** all credentials are external Swarm secrets and are not stored in this repository.
+- **Authentication:** Keycloak federates users from LLDAP. Applications connect as follows:
+  - Grafana, Actual and Open WebUI log in through Keycloak with OIDC, configured in their `docker-compose.yml`.
+  - Portainer and Gitea log in through Keycloak, configured in their web UI.
+  - Home Assistant skips Keycloak and queries LLDAP directly (`homeassistant/conf/lldap-ha-auth.sh`).
+  - Jellyfin does not use Keycloak, because its Android TV client does not support it.
 
 ## Stacks
 
 | Directory | Services | Purpose |
 | --- | --- | --- |
-| `traefik` | Traefik, socket proxy, oauth2-proxy | Reverse proxy and forward authentication |
+| `traefik` | Traefik, socket proxy | Reverse proxy |
 | `pihole` | Pi-hole, nginx | DNS and ad blocking |
 | `keycloak` | Keycloak, PostgreSQL | OIDC identity provider |
 | `lldap` | LLDAP | User directory |
@@ -110,7 +115,6 @@ printf '%s' 'value' | docker secret create <name> -
 | Stack | Secrets |
 | --- | --- |
 | Shared | `homelab_root_certificate`, `homelab_ssl_certificate`, `homelab_ssl_key` |
-| `traefik` | `oauth2_proxy_client_proxy`, `oauth2_proxy_cookie_secret` |
 | `keycloak` | `keycloak_postgresql_password`, `keycloak_admin_password` |
 | `lldap` | `lldap_jwt_token`, `lldap_key`, `lldap_admin_user_password`, `lldap_smtp_password` |
 | `metrics` | `grafana_admin_password`, `grafana_keycloak_client_secret` |
@@ -127,7 +131,12 @@ Two helper scripts are available:
 
 ## Deployment
 
-Run each deployment from inside the stack's directory, because configs use relative paths:
+In this setup, Portainer deploys the stacks from this repository in GitOps mode. This includes `pangolin`, even though it is a Docker Compose stack. The exceptions are:
+
+- `portainer-deploy`, which bootstraps Portainer with Ansible (see [Portainer](#portainer)).
+- `traefik`, `nut-server` and `keepalived`, which are deployed by hand.
+
+To deploy a Swarm stack without Portainer, run the command from inside the stack's directory, because configs use relative paths:
 
 ```console
 cd traefik
@@ -143,7 +152,7 @@ A sensible order is:
 
 Deploy `minecraft` after `metrics`, and keep the stack name `metrics`: Minecraft joins the `metrics_private` network so that Prometheus can scrape it.
 
-The `oauth2-proxy` service and the OIDC applications need a client configured in Keycloak. The client IDs are in each stack's `docker-compose.yml`.
+The applications that log in through Keycloak each need a client configured there. The client IDs are in each stack's `docker-compose.yml`, except for Portainer and Gitea, which are set in their web UI. The LLDAP federation is also configured in Keycloak and is not in this repository. See <https://github.com/lldap/lldap/blob/main/example_configs/keycloak.md>
 
 ### Portainer
 
@@ -199,7 +208,6 @@ Replace the placeholder players in `minecraft/conf/ops.json` and `minecraft/conf
 
 Values in this repository are sanitized or are placeholders. In particular, review:
 
-- **`metrics/grafana/ldap.toml`:** the bind password is masked.
 - **`traefik/docker-compose.yml`:** the dashboard's basic auth credentials.
 - **`pangolin/config/`:** the domain, secret and SMTP settings.
 - **`keycloak/docker-compose.yml`:** Keycloak runs with `start-dev`, which is not suited to an exposed deployment.
