@@ -1,0 +1,7 @@
+- name: Create Docker Swarm cluster
+  any_errors_fatal: true
+  roles:
+    - role: requirements
+      tags: always
+    - role: init_cluster
+      tags: always

@@ -1,0 +1,40 @@
+---
+- name: Gather installed packages
+  tags:
+    - requirements
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Detect Docker packages downgrade
+  tags:
+    - requirements
+  vars:
+    poulay_docker_swarm_wanted_versions:
+      docker-ce: "{{ poulay_docker_swarm_engine_version }}"
+      docker-ce-cli: "{{ poulay_docker_swarm_engine_version }}"
+      containerd.io: "{{ poulay_docker_swarm_containerd_version }}"
+      docker-buildx-plugin: "{{ poulay_docker_swarm_buildx_version }}"
+      docker-compose-plugin: "{{ poulay_docker_swarm_compose_version }}"
+  ansible.builtin.set_fact:
+    poulay_docker_swarm_downgrades: >-
+      {%- set ns = namespace(items=[]) -%}
+      {%- for name, wanted in poulay_docker_swarm_wanted_versions.items() if name in ansible_facts['packages'] -%}
+      {%- set current = ansible_facts['packages'][name][0]['version'] | regex_replace('^\d+:', '') | regex_replace('-.*$', '') -%}
+      {%- if current is version(wanted, '>') -%}
+      {%- set ns.items = ns.items + [name ~ ' ' ~ current ~ ' -> ' ~ wanted] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ ns.items }}
+
+- name: Fail on Docker packages downgrade
+  tags:
+    - requirements
+  ansible.builtin.fail:
+    msg: >-
+      Installed Docker packages are newer than the requested versions:
+      {{ poulay_docker_swarm_downgrades | join(', ') }}.
+      Update the poulay_docker_swarm_*_version variables, or set
+      poulay_docker_swarm_allow_downgrade: true to downgrade (restarts all containers on the node).
+  when:
+    - poulay_docker_swarm_downgrades | length > 0
+    - not poulay_docker_swarm_allow_downgrade | bool

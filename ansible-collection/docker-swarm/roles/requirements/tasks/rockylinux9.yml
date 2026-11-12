@@ -1,0 +1,151 @@
+---
+- name: Set Docker base URL with default registry
+  tags:
+    - requirements
+  ansible.builtin.set_fact:
+    poulay_docker_swarm_docker_registry_url: "{{ poulay_docker_swarm_rpm_registry }}/{{ redhat_family_distribution }}"
+    poulay_docker_swarm_docker_registry_path: "$releasever/$basearch/stable"
+  when: poulay_docker_swarm_rpm_registry == "download.docker.com/linux"
+
+- name: Set Docker base URL with custom registry
+  tags:
+    - requirements
+  ansible.builtin.set_fact:
+    poulay_docker_swarm_docker_registry_url: "{{ poulay_docker_swarm_rpm_registry }}"
+    poulay_docker_swarm_docker_registry_path: "{{ ansible_facts['distribution_major_version'] }}/$basearch/stable"
+  when: poulay_docker_swarm_rpm_registry != "download.docker.com/linux"
+
+- name: Add Docker signing key
+  tags:
+    - requirements
+  ansible.builtin.rpm_key:
+    key: "https://{{ poulay_docker_swarm_docker_registry_url }}/gpg"
+    state: present
+  retries: 3
+  delay: 10
+
+- name: Add Docker repository into repo.d list
+  tags:
+    - requirements
+  become: true
+  ansible.builtin.yum_repository:
+    name: docker
+    description: docker repository
+    baseurl: "https://{{ poulay_docker_swarm_docker_registry_url }}/{{ poulay_docker_swarm_docker_registry_path }}"
+    enabled: true
+    gpgcheck: true
+    gpgkey: "https://{{ poulay_docker_swarm_docker_registry_url }}/gpg"
+
+- name: Check Docker packages downgrade
+  tags:
+    - requirements
+  ansible.builtin.include_tasks: check_downgrade.yml
+
+- name: Install Docker
+  tags:
+    - requirements
+  become: true
+  throttle: 1
+  ansible.builtin.dnf:
+    name:
+      - docker-ce-{{ poulay_docker_swarm_engine_version }}
+      - docker-ce-cli-{{ poulay_docker_swarm_engine_version }}
+      - containerd.io-{{ poulay_docker_swarm_containerd_version }}
+      - docker-buildx-plugin-{{ poulay_docker_swarm_buildx_version }}
+      - docker-compose-plugin-{{ poulay_docker_swarm_compose_version }}
+    update_cache: true
+    allow_downgrade: "{{ poulay_docker_swarm_allow_downgrade | bool }}"
+    use_backend: dnf4
+  notify:
+    - Restart Docker
+
+- name: Install Python3
+  tags:
+    - requirements
+  become: true
+  ansible.builtin.dnf:
+    name:
+      - python3.12
+      - python3.12-pip
+    update_cache: true
+    use_backend: dnf4
+
+- name: Check if .docker folder exist
+  tags:
+    - requirements
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env'].HOME }}/.docker"
+    state: directory
+    mode: '0700'
+
+- name: Create .docker/config.json if it does not exist
+  become: true
+  tags:
+    - requirements
+  ansible.builtin.file:
+    dest: "{{ ansible_facts['env'].HOME }}/.docker/config.json"
+    state: touch
+    mode: '0600'
+    modification_time: preserve
+    access_time: preserve
+
+- name: Configure Docker daemon
+  tags:
+    - requirements
+  become: true
+  ansible.builtin.template:
+    src: docker_daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Restart Docker
+
+- name: Flush handlers
+  tags:
+    - requirements
+  ansible.builtin.meta: flush_handlers
+
+- name: Configure Pip conf
+  tags:
+    - requirements
+  become: true
+  ansible.builtin.template:
+    src: pip.conf.j2
+    dest: /etc/pip.conf
+    owner: root
+    group: root
+    mode: '0664'
+
+- name: Upgrade pip
+  tags:
+    - requirements
+  become: true
+  ansible.builtin.command: python3.12 -m pip install {{ poulay_docker_swarm_pip_extra_args }} --upgrade pip
+  register: poulay_docker_swarm_pip_upgrade
+  changed_when: poulay_docker_swarm_pip_upgrade.rc == 0
+
+- name: Install Python 3 lib
+  tags:
+    - requirements
+  become: true
+  ansible.builtin.pip:
+    name: "{{ item.name }}"
+    version: "{{ item.version }}"
+    executable: /usr/bin/pip3.12
+    extra_args: "{{ poulay_docker_swarm_pip_extra_args }}"
+    state: present
+  with_items:
+    - { name: docker, version: '7.1.0' }
+    - { name: jsondiff, version: '2.2.1' }
+    - { name: pyyaml, version: '6.0.2' }
+    - { name: setuptools-rust, version: '1.10.1' }
+    - { name: cryptography, version: '43.0.1' }
+
+- name: Configure SELinux
+  tags:
+    - requirements
+  when:
+    - poulay_docker_swarm_daemon_selinux_enabled
+  ansible.builtin.include_tasks: selinux.yml

@@ -1,0 +1,14 @@
+{
+{% if poulay_docker_swarm_image_registry %}
+    "registry-mirrors": ["https://{{ poulay_docker_swarm_image_registry }}"],
+{% endif %}
+    "default-address-pools": [{"base":"{{ poulay_docker_swarm_daemon_pool_address }}","size":24}],
+    "icc": false,
+    "no-new-privileges": true,
+    "userland-proxy": false,
+    "selinux-enabled": {{ (poulay_docker_swarm_daemon_selinux_enabled and ansible_facts['os_family'] == 'RedHat') | tojson }}{% if poulay_docker_swarm_daemon_extra_args is defined and poulay_docker_swarm_daemon_extra_args %},
+{% for key, value in poulay_docker_swarm_daemon_extra_args.items() %}
+    "{{ key }}": {{ value | tojson }}{% if not loop.last %},{% endif %}
+{% endfor %}{% endif %}
+
+}

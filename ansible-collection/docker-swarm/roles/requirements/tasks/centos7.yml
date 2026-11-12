@@ -1,0 +1,124 @@
+---
+- name: Set Python Interpreter
+  ansible.builtin.set_fact:
+    ansible_python_interpreter: /usr/bin/python3.6
+
+- name: Replace base CentOS yum repo
+  ansible.builtin.template:
+    src: yum.repo.j2
+    dest: /etc/yum.repos.d/CentOS-Base.repo
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Set Docker base URL with default registry
+  ansible.builtin.set_fact:
+    poulay_docker_swarm_registry_url: "{{ poulay_docker_swarm_rpm_registry }}/{{ redhat_family_distribution }}"
+    poulay_docker_swarm_registry_path: "$releasever/$basearch/stable"
+  when: poulay_docker_swarm_rpm_registry == "download.docker.com/linux"
+
+- name: Set Docker base URL with custom registry
+  ansible.builtin.set_fact:
+    poulay_docker_swarm_registry_url: "{{ poulay_docker_swarm_rpm_registry }}"
+    poulay_docker_swarm_registry_path: "{{ ansible_facts['distribution_major_version'] }}/$basearch/stable"
+  when: poulay_docker_swarm_rpm_registry != "download.docker.com/linux"
+
+- name: Install dnf
+  ansible.builtin.command: yum install -y dnf # noqa command-instead-of-module
+  register: poulay_docker_swarm_dnf_install
+  changed_when: "'Nothing to do' not in poulay_docker_swarm_dnf_install.stdout"
+
+- name: Add Docker signing key
+  ansible.builtin.rpm_key:
+    key: "https://{{ poulay_docker_swarm_registry_url }}/gpg"
+    state: present
+
+- name: Add Docker repository into repo.d list
+  ansible.builtin.yum_repository:
+    name: docker
+    description: docker repository
+    baseurl: "https://{{ poulay_docker_swarm_registry_url }}/{{ poulay_docker_swarm_registry_path }}"
+    enabled: true
+    gpgcheck: true
+    gpgkey: "https://{{ poulay_docker_swarm_registry_url }}/gpg"
+
+- name: Install Docker and Python3
+  become: true
+  ansible.builtin.dnf:
+    name:
+      - docker-ce-24.0.7
+      - docker-ce-cli-24.0.7
+      - containerd.io-1.6.24
+      - docker-buildx-plugin-0.11.2
+      - docker-compose-plugin-2.21.0
+      - python3
+      - python3-pip
+      - libffi-devel
+    update_cache: true
+    use_backend: dnf4
+
+- name: Check if .docker folder exist
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/.docker"
+    state: directory
+    mode: '0700'
+
+- name: Create .docker/config.json if it does not exist
+  become: true
+  ansible.builtin.file:
+    dest: "{{ ansible_env.HOME }}/.docker/config.json"
+    state: touch
+    mode: '0600'
+    modification_time: preserve
+    access_time: preserve
+
+- name: Configure Docker daemon
+  ansible.builtin.template:
+    src: docker_daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Start Docker
+  ansible.builtin.service:
+    name: "docker"
+    enabled: true
+    state: started
+
+- name: Configure Pip conf
+  ansible.builtin.template:
+    src: pip.conf.j2
+    dest: /etc/pip.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install Python 3
+  ansible.builtin.dnf:
+    name:
+      - python3
+      - python3-pip
+    update_cache: true
+    use_backend: dnf4
+
+- name: Upgrade pip
+  ansible.builtin.command: /usr/local/bin/pip3 install --upgrade pip
+  register: poulay_docker_swarm_pip_upgrade
+  changed_when: poulay_docker_swarm_pip_upgrade.rc == 0
+
+- name: Install Python 3 lib
+  ansible.builtin.pip:
+    name: '{{ item.name }}=={{ item.version }}'
+    executable: /usr/local/bin/pip3
+  with_items:
+    - { name: docker, version: '5.0.3' }
+    - { name: jsondiff, version: '2.0.0' }
+    - { name: pyyaml, version: '6.0.1' }
+    - { name: setuptools-rust, version: '1.1.2' }
+    - { name: cryptography, version: '40.0.2' }
+
+- name: Flush handlers
+  tags:
+    - requirements
+  ansible.builtin.meta: flush_handlers

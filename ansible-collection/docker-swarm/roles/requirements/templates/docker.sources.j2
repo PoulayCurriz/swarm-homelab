@@ -1,0 +1,6 @@
+Types: deb
+URIs: https://{{ poulay_docker_swarm_docker_registry_url }}
+Suites: {{ ansible_facts['distribution_release'] }}
+Components: stable
+Architectures: {{ poulay_docker_swarm_debian_arch }}
+Signed-By: /etc/apt/keyrings/docker.asc

@@ -1,0 +1,31 @@
+---
+- name: Set redhat family distribution
+  tags:
+    - requirements
+  ansible.builtin.set_fact:
+    redhat_family_distribution: >-
+      {{
+        'rhel' if ('Red Hat' in ansible_facts["distribution"])
+        else ('centos' if ('CentOS' in ansible_facts["distribution"] or 'Rocky' in ansible_facts["distribution"])
+        else ('fedora' if ('Fedora' in ansible_facts["distribution"])
+        else ansible_facts["distribution"] | lower))
+      }}
+  when: ansible_facts['os_family'] == "RedHat"
+
+- name: Centos 7 install requirements
+  tags:
+    - requirements
+  ansible.builtin.include_tasks: centos7.yml
+  when: ansible_facts["distribution"] == 'CentOS' and ansible_facts["distribution_major_version"] == '7'
+
+- name: RockyLinux 9 install requirements
+  tags:
+    - requirements
+  ansible.builtin.include_tasks: rockylinux9.yml
+  when: ansible_facts["distribution"] == 'Rocky' and ansible_facts["distribution_major_version"] == '9'
+
+- name: Debian install requirements
+  tags:
+    - requirements
+  ansible.builtin.include_tasks: debian.yml
+  when: ansible_facts["distribution"] == 'Debian' and ansible_facts["distribution_major_version"] in ['12', '13']

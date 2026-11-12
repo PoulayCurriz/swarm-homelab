@@ -1,0 +1,119 @@
+---
+- name: Check Swarm node certificate lifetime
+  ansible.builtin.assert:
+    that:
+      - poulay_docker_swarm_node_cert_expiry_days | int >= 1
+    fail_msg: "poulay_docker_swarm_node_cert_expiry_days must be an integer >= 1 (got {{ poulay_docker_swarm_node_cert_expiry_days }})."
+    quiet: true
+  when: inventory_hostname == groups['manager'][0]
+
+- name: Check Docker SDK for Python is installed
+  ansible.builtin.command:
+    argv:
+      - "{{ poulay_docker_swarm_python_interpreter }}"
+      - -c
+      - import docker
+  register: poulay_docker_swarm_sdk_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: ansible_check_mode
+
+- name: Check Docker daemon socket exists
+  ansible.builtin.stat:
+    path: /var/run/docker.sock
+  register: poulay_docker_swarm_socket_check
+  when: ansible_check_mode
+
+- name: Skip Swarm configuration in check mode when prerequisites are missing
+  vars:
+    poulay_docker_swarm_missing_prerequisites: >-
+      {{ ([] if poulay_docker_swarm_sdk_check.rc | default(1) == 0
+          else ['Docker SDK for Python (' ~ poulay_docker_swarm_python_interpreter ~ ')'])
+         + ([] if poulay_docker_swarm_socket_check.stat.exists | default(false)
+          else ['Docker daemon (/var/run/docker.sock)']) }}
+  when:
+    - ansible_check_mode
+    - poulay_docker_swarm_missing_prerequisites | length > 0
+  block:
+    - name: Warn about skipped Swarm configuration
+      ansible.builtin.debug:
+        msg: >-
+          Check mode: {{ poulay_docker_swarm_missing_prerequisites | join(', ') }}
+          not installed yet, Swarm configuration is not simulated on this host.
+    - name: End host in check mode
+      ansible.builtin.meta: end_host
+
+- name: Set Python Interpreter
+  ansible.builtin.set_fact:
+    ansible_python_interpreter: "{{ poulay_docker_swarm_python_interpreter }}"
+
+- name: Set Swarm node address
+  ansible.builtin.set_fact:
+    poulay_docker_swarm_node_addr: "{{ poulay_docker_swarm_advertise_addr }}"
+
+- name: Configure firewalld
+  ansible.builtin.include_tasks: firewalld.yml
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Configure ufw
+  ansible.builtin.include_tasks: ufw.yml
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - poulay_docker_swarm_ufw_enabled
+
+- name: Init swarm with default parameters
+  become: true
+  community.docker.docker_swarm:
+    state: present
+    data_path_port: 9789
+    node_cert_expiry: "{{ (poulay_docker_swarm_node_cert_expiry_days | int) * 86400 * 1000000000 }}"
+    default_addr_pool: '{{ poulay_docker_swarm_cluster_pool_address }}'
+    advertise_addr: '{{ poulay_docker_swarm_node_addr }}'
+  register: poulay_docker_swarm_manager_status
+  when: inventory_hostname == groups['manager'][0]
+
+- name: Set join-token for nodes
+  ansible.builtin.set_fact:
+    poulay_docker_swarm_join_token_manager: "{{ hostvars[groups['manager'][0]].poulay_docker_swarm_manager_status.swarm_facts.JoinTokens.Manager }}"
+    poulay_docker_swarm_join_token_worker: "{{ hostvars[groups['manager'][0]].poulay_docker_swarm_manager_status.swarm_facts.JoinTokens.Worker }}"
+  when: >-
+    not ansible_check_mode
+    or hostvars[groups['manager'][0]].poulay_docker_swarm_manager_status.swarm_facts.JoinTokens is defined
+
+- name: Add worker to Swarm cluster
+  become: true
+  community.docker.docker_swarm:
+    state: join
+    advertise_addr: '{{ poulay_docker_swarm_node_addr }}'
+    join_token: '{{ poulay_docker_swarm_join_token_worker }}'
+    default_addr_pool: '{{ poulay_docker_swarm_cluster_pool_address }}'
+    remote_addrs: "{{ hostvars[groups['manager'][0]].poulay_docker_swarm_node_addr }}"
+  when:
+    - groups['worker'] is defined
+    - inventory_hostname in groups['worker']
+    - poulay_docker_swarm_join_token_worker is defined
+  register: poulay_docker_swarm_worker_status
+
+- name: Add manager to Swarm cluster
+  become: true
+  community.docker.docker_swarm:
+    state: join
+    advertise_addr: '{{ poulay_docker_swarm_node_addr }}'
+    join_token: '{{ poulay_docker_swarm_join_token_manager }}'
+    default_addr_pool: '{{ poulay_docker_swarm_cluster_pool_address }}'
+    remote_addrs: "{{ hostvars[groups['manager'][0]].poulay_docker_swarm_node_addr }}"
+  when:
+    - inventory_hostname in groups['manager']
+    - inventory_hostname != groups['manager'][0]
+    - poulay_docker_swarm_join_token_manager is defined
+  register: poulay_docker_swarm_manager_join_status
+
+- name: Reboot machine
+  become: true
+  throttle: 1
+  ansible.builtin.reboot:
+  when: >-
+    poulay_docker_swarm_manager_status.actions | default([]) | select('match', 'New Swarm cluster created') | list | length > 0
+    or poulay_docker_swarm_manager_join_status | default({}) is changed
+    or poulay_docker_swarm_worker_status | default({}) is changed

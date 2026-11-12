@@ -1,0 +1,90 @@
+---
+- name: Try to start and enable firewalld
+  become: true
+  when:
+    - not ansible_check_mode
+  block:
+    - name: Start and enable firewalld
+      ansible.builtin.systemd_service:
+        state: started
+        enabled: true
+        name: firewalld
+      retries: 3
+      delay: 10
+  rescue:
+    - name: Register firewalld failure
+      ansible.builtin.set_fact:
+        firewalld_failure: true
+
+- name: Allow communication between manager nodes
+  become: true
+  when:
+    - not ansible_check_mode
+    - groups['manager'] is defined
+    - inventory_hostname in groups['manager']
+    - firewalld_failure is undefined
+  ansible.posix.firewalld:
+    port: "2377/tcp"
+    permanent: true
+    state: enabled
+    immediate: true
+    zone: public
+  retries: 3
+  delay: 10
+
+- name: Allow communication between Swarm nodes
+  become: true
+  when:
+    - not ansible_check_mode
+    - firewalld_failure is undefined
+  ansible.posix.firewalld:
+    port: "{{ item.port }}/{{ item.proto }}"
+    permanent: true
+    state: enabled
+    immediate: true
+    zone: public
+  with_items:
+    - { port: "7946", proto: "tcp" }
+    - { port: "7946", proto: "udp" }
+  retries: 3
+  delay: 10
+
+- name: Set trusted Swarm nodes
+  tags: always
+  when:
+    - not ansible_check_mode
+    - firewalld_failure is undefined
+  ansible.builtin.set_fact:
+    poulay_docker_swarm_trusted_nodes: >-
+      {{ (groups['manager'] | default([])) | union(groups['worker'] | default([]))
+         | map('extract', hostvars, 'poulay_docker_swarm_node_addr') | list }}
+  retries: 3
+  delay: 10
+
+- name: Allow VXLAN (UDP 9789) for Swarm node only
+  become: true
+  when:
+    - not ansible_check_mode
+    - firewalld_failure is undefined
+  ansible.posix.firewalld:
+    rich_rule: rule family="ipv4" source address="{{ item }}" port port="9789" protocol="udp" accept
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ poulay_docker_swarm_trusted_nodes }}"
+  retries: 3
+  delay: 10
+
+- name: Allow ESP for Swarm node only
+  become: true
+  when:
+    - not ansible_check_mode
+    - firewalld_failure is undefined
+  ansible.posix.firewalld:
+    rich_rule: rule family="ipv4" source address="{{ item }}" protocol value="esp" accept
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ poulay_docker_swarm_trusted_nodes }}"
+  retries: 3
+  delay: 10

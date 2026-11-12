@@ -1,0 +1,36 @@
+---
+- name: Configure AppArmor for Docker
+  tags:
+    - requirements
+  become: true
+  block:
+    - name: Install AppArmor tools
+      ansible.builtin.apt:
+        name:
+          - apparmor
+          - apparmor-utils
+      notify:
+        - Restart Docker
+
+    - name: Start and enable AppArmor
+      ansible.builtin.systemd_service:
+        name: apparmor
+        enabled: true
+        state: started
+      notify:
+        - Restart Docker
+
+    - name: Check AppArmor status in the kernel
+      ansible.builtin.command: aa-enabled
+      register: poulay_docker_swarm_apparmor_state
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Fail when AppArmor is disabled in the kernel
+      ansible.builtin.fail:
+        msg: >-
+          AppArmor is disabled in the kernel ({{ poulay_docker_swarm_apparmor_state.stdout | default('unknown') }}).
+          Remove apparmor=0 / security= from the kernel command line (GRUB_CMDLINE_LINUX), run update-grub and reboot,
+          or set poulay_docker_swarm_apparmor_enabled to false.
+      when: poulay_docker_swarm_apparmor_state.rc != 0

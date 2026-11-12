@@ -1,0 +1,5 @@
+[global]
+index = https://{{ poulay_docker_swarm_pypi_registry }}/pypi
+index-url = https://{{ poulay_docker_swarm_pypi_registry }}/simple
+#extra-index-url =
+cert = {{ '/etc/ssl/certs/ca-certificates.crt' if ansible_facts['os_family'] == 'Debian' else '/etc/pki/tls/certs/ca-bundle.crt' }}

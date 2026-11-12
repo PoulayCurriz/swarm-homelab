@@ -1,0 +1,78 @@
+---
+# Rules are added before ufw is enabled, so SSH access is never cut.
+- name: Configure ufw
+  become: true
+  when:
+    - not ansible_check_mode
+  block:
+    - name: Install ufw
+      ansible.builtin.apt:
+        name: ufw
+
+    - name: Allow SSH
+      community.general.ufw:
+        rule: allow
+        port: "{{ poulay_docker_swarm_ufw_ssh_port | string }}"
+        proto: tcp
+        comment: SSH
+
+    - name: Allow extra rules
+      community.general.ufw:
+        rule: "{{ item.rule | default('allow') }}"
+        port: "{{ item.port | default(omit) }}"
+        proto: "{{ item.proto | default(omit) }}"
+        from_ip: "{{ item.from_ip | default('any') }}"
+        comment: "{{ item.comment | default(omit) }}"
+      loop: "{{ poulay_docker_swarm_ufw_extra_rules }}"
+
+    - name: Allow communication between manager nodes
+      community.general.ufw:
+        rule: allow
+        port: "2377"
+        proto: tcp
+        comment: Docker Swarm management
+      when:
+        - groups['manager'] is defined
+        - inventory_hostname in groups['manager']
+
+    - name: Allow communication between Swarm nodes
+      community.general.ufw:
+        rule: allow
+        port: "7946"
+        proto: "{{ item }}"
+        comment: Docker Swarm node communication
+      loop:
+        - tcp
+        - udp
+
+    - name: Set trusted Swarm nodes
+      ansible.builtin.set_fact:
+        poulay_docker_swarm_trusted_nodes: >-
+          {{ (groups['manager'] | default([])) | union(groups['worker'] | default([]))
+             | map('extract', hostvars, 'poulay_docker_swarm_node_addr') | list }}
+
+    - name: Allow VXLAN (UDP 9789) for Swarm node only
+      community.general.ufw:
+        rule: allow
+        port: "9789"
+        proto: udp
+        from_ip: "{{ item }}"
+        comment: Docker Swarm overlay
+      loop: "{{ poulay_docker_swarm_trusted_nodes }}"
+
+    - name: Allow ESP for Swarm node only
+      community.general.ufw:
+        rule: allow
+        proto: esp
+        from_ip: "{{ item }}"
+        comment: Docker Swarm encrypted overlay
+      loop: "{{ poulay_docker_swarm_trusted_nodes }}"
+
+    - name: Deny incoming traffic by default
+      community.general.ufw:
+        direction: incoming
+        default: deny
+
+    - name: Enable ufw
+      community.general.ufw:
+        state: enabled

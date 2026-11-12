@@ -1,0 +1,8 @@
+---
+poulay_docker_swarm_advertise_addr: "{{ ansible_facts['default_ipv4']['address'] }}"
+poulay_docker_swarm_node_cert_expiry_days: 365
+poulay_docker_swarm_ufw_enabled: true
+poulay_docker_swarm_ufw_ssh_port: "{{ ansible_port | default(22) }}"
+poulay_docker_swarm_ufw_extra_rules: []
+poulay_docker_swarm_python_interpreter: >-
+  {{ '/usr/bin/python3' if ansible_facts['os_family'] == 'Debian' else '/usr/bin/python3.12' }}

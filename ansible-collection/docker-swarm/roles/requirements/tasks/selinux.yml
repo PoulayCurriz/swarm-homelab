@@ -1,0 +1,100 @@
+---
+- name: Configure SELinux for Docker
+  tags:
+    - requirements
+  become: true
+  vars:
+    # SELinux and dnf Python bindings are only available for the system interpreter
+    ansible_python_interpreter: /usr/bin/python3
+  block:
+    - name: Install SELinux tools
+      ansible.builtin.dnf:
+        name:
+          - checkpolicy
+          - policycoreutils
+          - policycoreutils-python-utils
+        use_backend: dnf4
+
+    - name: Enable SELinux
+      ansible.posix.selinux:
+        policy: targeted
+        state: enforcing
+      register: poulay_docker_swarm_selinux_state
+
+    - name: Fail when a reboot is required to enable SELinux
+      ansible.builtin.fail:
+        msg: >-
+          SELinux was disabled: a reboot is required to enable it.
+          Reboot the node, or set poulay_docker_swarm_selinux_reboot to true, then run the playbook again.
+      when:
+        - poulay_docker_swarm_selinux_state.reboot_required | default(false)
+        - not poulay_docker_swarm_selinux_reboot
+
+    - name: Reboot to enable SELinux
+      # Full filesystem relabel at boot: one node at a time to keep the Swarm available
+      throttle: 1
+      ansible.builtin.reboot:
+        reboot_timeout: "{{ poulay_docker_swarm_selinux_reboot_timeout }}"
+      when:
+        - poulay_docker_swarm_selinux_state.reboot_required | default(false)
+        - poulay_docker_swarm_selinux_reboot
+
+    - name: Create SELinux modules folder
+      ansible.builtin.file:
+        path: "{{ poulay_docker_swarm_selinux_module_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Copy SELinux modules sources
+      ansible.builtin.copy:
+        src: "{{ item.name }}.te"
+        dest: "{{ poulay_docker_swarm_selinux_module_path }}/{{ item.name }}.te"
+        owner: root
+        group: root
+        mode: '0644'
+      loop: "{{ poulay_docker_swarm_daemon_selinux_module }}"
+      register: poulay_docker_swarm_selinux_module_sources
+
+    - name: List installed SELinux modules
+      ansible.builtin.command: semodule -l
+      register: poulay_docker_swarm_selinux_installed_modules
+      changed_when: false
+      check_mode: false
+
+    - name: Build and install SELinux modules
+      vars:
+        poulay_docker_swarm_selinux_module_file: "{{ poulay_docker_swarm_selinux_module_path }}/{{ item.item.name }}"
+      ansible.builtin.shell:
+        cmd: >-
+          set -o errexit;
+          checkmodule -M -m -o {{ poulay_docker_swarm_selinux_module_file }}.mod {{ poulay_docker_swarm_selinux_module_file }}.te;
+          semodule_package -o {{ poulay_docker_swarm_selinux_module_file }}.pp -m {{ poulay_docker_swarm_selinux_module_file }}.mod;
+          semodule -i {{ poulay_docker_swarm_selinux_module_file }}.pp
+      loop: "{{ poulay_docker_swarm_selinux_module_sources.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: >-
+        item.changed or
+        item.item.name not in poulay_docker_swarm_selinux_installed_modules.stdout_lines
+      changed_when: true
+
+    - name: Set SELinux context of Docker socket
+      community.general.sefcontext:
+        target: /var/run/docker.sock
+        setype: container_var_run_t
+        state: present
+
+    - name: Set SELinux context of container volumes
+      community.general.sefcontext:
+        target: "{{ item }}(/.*)?"
+        setype: container_file_t
+        state: present
+      loop: "{{ poulay_docker_swarm_selinux_container_paths }}"
+
+    - name: Apply SELinux contexts
+      ansible.builtin.command:
+        cmd: restorecon -i -R -v {{ (['/var/run/docker.sock'] + poulay_docker_swarm_selinux_container_paths) | join(' ') }}
+      register: poulay_docker_swarm_selinux_restorecon
+      changed_when: poulay_docker_swarm_selinux_restorecon.stdout | length > 0

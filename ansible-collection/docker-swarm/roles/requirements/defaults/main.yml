@@ -1,0 +1,40 @@
+---
+poulay_docker_swarm_repository_url:
+poulay_docker_swarm_repository_path: repository
+poulay_docker_swarm_public_repository: "{{ poulay_docker_swarm_repository_url == 'download.docker.com' }}"
+poulay_docker_swarm_rpm_registry: >-
+  {{ 'download.docker.com/linux' if poulay_docker_swarm_public_repository | bool
+  else poulay_docker_swarm_repository_url ~ '/' ~ poulay_docker_swarm_repository_path ~ '/all-rpm-docker-remote' }}
+poulay_docker_swarm_image_registry: >-
+  {{ '' if poulay_docker_swarm_public_repository | bool
+  else 'all-docker-dockerhub-remote.' ~ poulay_docker_swarm_repository_url }}
+poulay_docker_swarm_pypi_registry: >-
+  {{ 'pypi.org' if poulay_docker_swarm_public_repository | bool
+  else poulay_docker_swarm_repository_url ~ '/' ~ poulay_docker_swarm_repository_path ~ '/all-pypi-pip-remote' }}
+poulay_docker_swarm_pip_extra_args: >-
+  {{ '' if poulay_docker_swarm_public_repository | bool
+  else '--trusted-host ' ~ poulay_docker_swarm_repository_url }}
+poulay_docker_swarm_apt_registry: >-
+  {{ 'download.docker.com/linux' if poulay_docker_swarm_public_repository | bool
+  else poulay_docker_swarm_repository_url ~ '/' ~ poulay_docker_swarm_repository_path ~ '/all-apt-docker-remote' }}
+poulay_docker_swarm_debian_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+poulay_docker_swarm_centos_rpm_registry: "{{ poulay_docker_swarm_repository_url }}/{{ poulay_docker_swarm_repository_path }}/all-rpm-centos-remote"
+
+poulay_docker_swarm_cluster_pool_address: 172.22.128.0/17
+poulay_docker_swarm_daemon_pool_address: 172.22.0.0/17
+poulay_docker_swarm_daemon_selinux_enabled: true
+poulay_docker_swarm_daemon_selinux_module:
+  - { name: docker_socket_container }
+poulay_docker_swarm_apparmor_enabled: true
+poulay_docker_swarm_selinux_module_path: /usr/share/selinux/poulay
+poulay_docker_swarm_selinux_container_paths: []
+poulay_docker_swarm_selinux_reboot: true
+poulay_docker_swarm_selinux_reboot_timeout: 3600
+
+poulay_docker_swarm_engine_version: 29.9.3
+poulay_docker_swarm_compose_version: 5.7.0
+poulay_docker_swarm_containerd_version: 2.4.2
+poulay_docker_swarm_buildx_version: 0.39.0
+poulay_docker_swarm_allow_downgrade: false

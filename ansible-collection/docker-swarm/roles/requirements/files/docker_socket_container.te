@@ -1,0 +1,12 @@
+module docker_socket_container 1.1;
+
+require {
+    type container_t;
+    type container_var_run_t;
+    type container_runtime_t;
+    class sock_file write;
+    class unix_stream_socket connectto;
+}
+
+allow container_t container_runtime_t:unix_stream_socket connectto;
+allow container_t container_var_run_t:sock_file write;

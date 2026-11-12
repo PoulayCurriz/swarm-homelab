@@ -1,0 +1,152 @@
+---
+- name: Check Debian architecture
+  tags:
+    - requirements
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['architecture'] in poulay_docker_swarm_debian_arch_map
+    fail_msg: >-
+      Unsupported architecture {{ ansible_facts['architecture'] }},
+      supported: {{ poulay_docker_swarm_debian_arch_map.keys() | join(', ') }}.
+    quiet: true
+
+- name: Set Debian architecture
+  tags:
+    - requirements
+  ansible.builtin.set_fact:
+    poulay_docker_swarm_debian_arch: "{{ poulay_docker_swarm_debian_arch_map[ansible_facts['architecture']] }}"
+
+- name: Set Docker base URL with default registry
+  tags:
+    - requirements
+  ansible.builtin.set_fact:
+    poulay_docker_swarm_docker_registry_url: "{{ poulay_docker_swarm_apt_registry }}/debian"
+  when: poulay_docker_swarm_apt_registry == "download.docker.com/linux"
+
+- name: Set Docker base URL with custom registry
+  tags:
+    - requirements
+  ansible.builtin.set_fact:
+    poulay_docker_swarm_docker_registry_url: "{{ poulay_docker_swarm_apt_registry }}"
+  when: poulay_docker_swarm_apt_registry != "download.docker.com/linux"
+
+- name: Install apt prerequisites
+  tags:
+    - requirements
+  become: true
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - python3
+    update_cache: true
+
+- name: Configure AppArmor
+  tags:
+    - requirements
+  when:
+    - poulay_docker_swarm_apparmor_enabled
+  ansible.builtin.include_tasks: apparmor.yml
+
+- name: Create apt keyrings folder
+  tags:
+    - requirements
+  become: true
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Add Docker signing key
+  tags:
+    - requirements
+  become: true
+  ansible.builtin.get_url:
+    url: "https://{{ poulay_docker_swarm_docker_registry_url }}/gpg"
+    dest: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: '0644'
+  retries: 3
+  delay: 10
+
+- name: Add Docker repository into sources list
+  tags:
+    - requirements
+  become: true
+  ansible.builtin.template:
+    src: docker.sources.j2
+    dest: /etc/apt/sources.list.d/docker.sources
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Check Docker packages downgrade
+  tags:
+    - requirements
+  ansible.builtin.include_tasks: check_downgrade.yml
+
+- name: Install Docker
+  tags:
+    - requirements
+  become: true
+  throttle: 1
+  ansible.builtin.apt:
+    name:
+      - docker-ce=5:{{ poulay_docker_swarm_engine_version }}-*
+      - docker-ce-cli=5:{{ poulay_docker_swarm_engine_version }}-*
+      - containerd.io={{ poulay_docker_swarm_containerd_version }}-*
+      - docker-buildx-plugin={{ poulay_docker_swarm_buildx_version }}-*
+      - docker-compose-plugin={{ poulay_docker_swarm_compose_version }}-*
+    update_cache: true
+    allow_downgrade: "{{ poulay_docker_swarm_allow_downgrade | bool }}"
+  notify:
+    - Restart Docker
+
+- name: Check if .docker folder exist
+  tags:
+    - requirements
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env'].HOME }}/.docker"
+    state: directory
+    mode: '0700'
+
+- name: Create .docker/config.json if it does not exist
+  become: true
+  tags:
+    - requirements
+  ansible.builtin.file:
+    dest: "{{ ansible_facts['env'].HOME }}/.docker/config.json"
+    state: touch
+    mode: '0600'
+    modification_time: preserve
+    access_time: preserve
+
+- name: Configure Docker daemon
+  tags:
+    - requirements
+  become: true
+  ansible.builtin.template:
+    src: docker_daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Restart Docker
+
+- name: Flush handlers
+  tags:
+    - requirements
+  ansible.builtin.meta: flush_handlers
+
+- name: Install Docker SDK for Python
+  tags:
+    - requirements
+  become: true
+  ansible.builtin.apt:
+    name:
+      - python3-docker
+      - python3-jsondiff
+      - python3-yaml
